@@ -3,6 +3,7 @@
 #include <Update.h>
 #include <HTTPClient.h>
 #include <esp_task_wdt.h>
+#include <LittleFS.h>
 #include "ConfigSettings.h"
 #include "GitOTA.h"
 #include "Utils.h"
@@ -443,9 +444,15 @@ bool GitUpdater::beginUpdate(const char *version) {
       delay(100);
       Serial.println("Committing Configuration...");
       somfy.commit();
+      // Only reboot into the new image once we know the littlefs write
+      // actually succeeded and validated -- rebooting unconditionally here
+      // is what turns a transient download failure into a bricked web UI.
+      rebootDelay.reboot = true;
+      rebootDelay.rebootTime = millis() + 500;
     }
-    rebootDelay.reboot = true;
-    rebootDelay.rebootTime = millis() + 500;
+    else {
+      Serial.printf("Filesystem update failed (error %d) - staying on current session, not rebooting\n", this->error);
+    }
   }
   this->status = GIT_UPDATE_COMPLETE;
   this->emitUpdateCheck();
@@ -463,13 +470,38 @@ bool GitUpdater::recoverFilesystem() {
     delay(100);
     Serial.println("Committing Configuration...");
     somfy.commit();
+    rebootDelay.reboot = true;
+    rebootDelay.rebootTime = millis() + 500;
+  }
+  else {
+    Serial.printf("Filesystem recovery failed (error %d) - staying on current session, not rebooting\n", this->error);
   }
   this->status = GIT_UPDATE_COMPLETE;
-  rebootDelay.reboot = true;
-  rebootDelay.rebootTime = millis() + 500;
   return true;
 }
 bool GitUpdater::endUpdate() { return true; }
+// Mounts the LittleFS partition just written by Update.write()/Update.end()
+// and confirms it actually holds a usable web UI, rather than trusting the
+// downloaded-byte-count check alone. A truncated or bit-corrupted stream can
+// still land on the expected total size while producing an unmountable or
+// empty filesystem (the "Corrupted dir pair" failure mode reported in
+// https://github.com/rstrouse/ESPSomfy-RTS/issues/493 and /579). Returning
+// false here means the caller must NOT reboot into this partition.
+bool GitUpdater::validateFilesystem() {
+  LittleFS.end();
+  if(!LittleFS.begin(false)) {
+    Serial.println("LittleFS validation: partition did not mount after update");
+    return false;
+  }
+  bool ok = LittleFS.exists("/index.html");
+  if(ok) {
+    File f = LittleFS.open("/index.html", "r");
+    ok = f && f.size() > 0;
+    if(f) f.close();
+  }
+  if(!ok) Serial.println("LittleFS validation: mounted, but /index.html is missing or empty");
+  return ok;
+}
 int8_t GitUpdater::downloadFile() {
   Serial.printf("Begin update %s\n", this->currentFile);
   WiFiClientSecure sclient;
@@ -563,8 +595,17 @@ int8_t GitUpdater::downloadFile() {
             Serial.println("Error downloading file!!!");
             return -42;
           }
-          else
+          else {
             Serial.printf("Update %s complete\n", this->currentFile);
+            // Byte count matching len does not guarantee the written data is
+            // actually a valid filesystem -- a truncated/garbled stream can still
+            // land on the expected total. Mount and sanity-check it before we
+            // let the caller commit to rebooting into it.
+            if(this->partition == U_SPIFFS && !this->validateFilesystem()) {
+              Serial.println("LittleFS validation failed after update - refusing to commit");
+              return ERR_FS_VALIDATION;
+            }
+          }
         }
         else {
           // TODO: memory allocation error.
