@@ -338,7 +338,9 @@ void SomfyNet::setConnected(conn_types_t connType) {
     snprintf(sModel, sizeof(sModel), "ESP32-%s", settings.chipModel);
     SSDP.setModelNumber(0, sModel);
   }
-  SSDP.setModelURL(0, "https://github.com/rstrouse/ESPSomfy-RTS");
+  SSDP.setModelURL(0, "https://github.com/materko/ESPSomfy-RTS");
+  // The manufacturer string and the device type urn above are what the Home Assistant
+  // integration matches on during discovery, so they stay as upstream published them.
   SSDP.setManufacturer(0, "rstrouse");
   SSDP.setManufacturerURL(0, "https://github.com/rstrouse");
   SSDP.setURL(0, "/");

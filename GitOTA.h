@@ -63,6 +63,7 @@ class GitUpdater {
     void toJSON(JsonResponse &json);
     bool recoverFilesystem();
     bool validateFilesystem();
+    bool rollbackFirmware();
     int checkInternet();
     void emitUpdateCheck(uint8_t num=255);
     void emitDownloadProgress(size_t total, size_t loaded, const char *evt = "updateProgress");

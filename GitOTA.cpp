@@ -4,6 +4,7 @@
 #include <HTTPClient.h>
 #include <esp_task_wdt.h>
 #include <LittleFS.h>
+#include <esp_ota_ops.h>
 #include "ConfigSettings.h"
 #include "GitOTA.h"
 #include "Utils.h"
@@ -99,7 +100,7 @@ int16_t GitRepo::getReleases(uint8_t num) {
   uint8_t count = min((uint8_t)GIT_MAX_RELEASES, num);
   char url[128];
   memset(this->releases, 0x00, sizeof(GitRelease) * GIT_MAX_RELEASES);
-  sprintf(url, "https://api.github.com/repos/rstrouse/espsomfy-rts/releases?per_page=%d&page=1", count);
+  sprintf(url, "https://api.github.com/repos/materko/ESPSomfy-RTS/releases?per_page=%d&page=1", count);
   GitRelease *main = &this->releases[GIT_MAX_RELEASES];
   main->releaseDate = Timestamp::now();
   main->id = 1;
@@ -358,7 +359,7 @@ int GitUpdater::checkInternet() {
   esp_task_wdt_reset();
   HTTPClient https;
   https.setReuse(false);
-  if(https.begin(sclient, "https://github.com/rstrouse/ESPSomfy-RTS")) {
+  if(https.begin(sclient, "https://github.com/materko/ESPSomfy-RTS")) {
     https.setFollowRedirects(HTTPC_FORCE_FOLLOW_REDIRECTS);
     https.setTimeout(3000);
     esp_task_wdt_reset();
@@ -422,8 +423,8 @@ void GitUpdater::setFirmwareFile() {
 
 bool GitUpdater::beginUpdate(const char *version) {
   Serial.println("Begin update called...");
-  if(strcmp(version, "Main") == 0)  strcpy(this->baseUrl, "https://raw.githubusercontent.com/rstrouse/ESPSomfy-RTS/master/");
-  else sprintf(this->baseUrl, "https://github.com/rstrouse/ESPSomfy-RTS/releases/download/%s/", version);
+  if(strcmp(version, "Main") == 0)  strcpy(this->baseUrl, "https://raw.githubusercontent.com/materko/ESPSomfy-RTS/main/");
+  else sprintf(this->baseUrl, "https://github.com/materko/ESPSomfy-RTS/releases/download/%s/", version);
   
   strcpy(this->targetRelease, version);
   this->emitUpdateCheck();
@@ -452,6 +453,10 @@ bool GitUpdater::beginUpdate(const char *version) {
     }
     else {
       Serial.printf("Filesystem update failed (error %d) - staying on current session, not rebooting\n", this->error);
+      // The firmware image was written and marked bootable before we got here, so
+      // without this the next power cycle would still boot the new image against the
+      // filesystem we just failed to write.
+      this->rollbackFirmware();
     }
   }
   this->status = GIT_UPDATE_COMPLETE;
@@ -459,7 +464,7 @@ bool GitUpdater::beginUpdate(const char *version) {
   return true;
 }
 bool GitUpdater::recoverFilesystem() {
-  sprintf(this->baseUrl, "https://github.com/rstrouse/ESPSomfy-RTS/releases/download/%s/", settings.fwVersion.name);
+  sprintf(this->baseUrl, "https://github.com/materko/ESPSomfy-RTS/releases/download/%s/", settings.fwVersion.name);
   strcpy(this->currentFile, "SomfyController.littlefs.bin");
   this->status = GIT_UPDATING;
   this->partition = U_SPIFFS;
@@ -480,6 +485,25 @@ bool GitUpdater::recoverFilesystem() {
   return true;
 }
 bool GitUpdater::endUpdate() { return true; }
+// Points the bootloader back at the partition we are currently running from.
+// Update.end() marks the freshly written OTA slot bootable as soon as the firmware
+// image is complete, and that happens before the filesystem is fetched. If the
+// filesystem step then fails, declining to reboot only defers booting the new image
+// until the next power cycle unless the boot partition is put back.
+bool GitUpdater::rollbackFirmware() {
+  const esp_partition_t *running = esp_ota_get_running_partition();
+  if(!running) {
+    Serial.println("Rollback: could not determine the running partition");
+    return false;
+  }
+  esp_err_t err = esp_ota_set_boot_partition(running);
+  if(err != ESP_OK) {
+    Serial.printf("Rollback to %s failed (error %d) - the device will boot the new firmware\n", running->label, err);
+    return false;
+  }
+  Serial.printf("Rolled the boot partition back to %s\n", running->label);
+  return true;
+}
 // Mounts the LittleFS partition just written by Update.write()/Update.end()
 // and confirms it actually holds a usable web UI, rather than trusting the
 // downloaded-byte-count check alone. A truncated or bit-corrupted stream can
