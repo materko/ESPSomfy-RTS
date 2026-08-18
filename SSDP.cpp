@@ -381,6 +381,14 @@ void SSDPClass::_parsePacket(ssdp_packet_t *pkt, AsyncUDPPacket &p) {
 IPAddress SSDPClass::localIP()
 {
     // Make sure we don't get a null IPAddress.
+#if ESP_ARDUINO_VERSION_MAJOR >= 3
+    // tcpip_adapter was dropped in IDF 5; esp_netif is the replacement.
+    esp_netif_ip_info_t ip;
+    esp_netif_t *netif = nullptr;
+    if (WiFi.getMode() == WIFI_STA) netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+    else if (WiFi.getMode() == WIFI_OFF) netif = esp_netif_get_handle_from_ifkey("ETH_DEF");
+    if (!netif || esp_netif_get_ip_info(netif, &ip)) return IPAddress();
+#else
     tcpip_adapter_ip_info_t ip;
     if (WiFi.getMode() == WIFI_STA) {
         if (tcpip_adapter_get_ip_info(TCPIP_ADAPTER_IF_STA, &ip)) {
@@ -391,6 +399,7 @@ IPAddress SSDPClass::localIP()
             return IPAddress();
         }
     }
+#endif
     return IPAddress(ip.ip.addr);
 }    
 void SSDPClass::_sendResponse(IPAddress addr, uint16_t port, UPNPDeviceType *d, const char *st, response_types_t responseType) {

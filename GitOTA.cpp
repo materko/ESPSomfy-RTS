@@ -11,7 +11,7 @@
 #include "Somfy.h"
 #include "Web.h"
 #include "WResp.h"
-#include "Network.h"
+#include "SomfyNet.h"
 
 
 
@@ -21,7 +21,7 @@ extern SocketEmitter sockEmit;
 extern SomfyShadeController somfy;
 extern rebootDelay_t rebootDelay;
 extern Web webServer;
-extern Network net;
+extern SomfyNet net;
 
 
 

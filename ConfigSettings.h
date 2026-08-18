@@ -1,5 +1,5 @@
 #include <ArduinoJson.h>
-#include <ETH.h>
+#include "EspCompat.h"
 #ifndef configsettings_h
 #define configsettings_h
 #include "WResp.h"
