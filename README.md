@@ -1,5 +1,60 @@
 # ESPSomfy-RTS <image src="https://user-images.githubusercontent.com/47839015/218898940-3541b360-5c49-4e38-a918-392cd0408b76.png" align="right" style="width:177px;display:inline-block;float:right"></image>
 
+> ## About this fork
+>
+> This fork exists to run ESPSomfy RTS on an **ESP32-S3 module with 16MB flash**
+> (ESP32-S3-WROOM-1 N16R8). It is built against **Arduino ESP32 core 3.x**, where
+> upstream targets core 2.0.17.
+>
+> **Why the core had to change.** On these modules core 2.0.17 (IDF 4.4) reads flash
+> incorrectly through `esp_flash_read()`: only the first 32 bytes of each transaction
+> reach the caller's buffer, the rest is stale data. Code execution is unaffected
+> because it runs through the cache, but LittleFS validates nothing and fails to mount
+> with `Corrupted dir pair`, so the web UI answers every request with
+> `Error opening /index.html`. Reflashing the filesystem never fixes it — the image on
+> flash is byte-perfect, the driver simply cannot read it back. Core 3.x (IDF 5.x)
+> reads the same flash on the same board correctly. This is the failure mode reported
+> upstream in [#493](https://github.com/rstrouse/ESPSomfy-RTS/issues/493) and
+> [#579](https://github.com/rstrouse/ESPSomfy-RTS/issues/579).
+>
+> **What that required.**
+>
+> * The project's own `Network` class collided with the `Network` object core 3.x
+>   introduced, which broke the core's own WiFi and WebServer headers. It is now
+>   `SomfyNet` in `SomfyNet.h` / `SomfyNet.cpp`.
+> * `EspCompat.h` supplies the RMII ethernet symbols that core 3.x only declares on
+>   chips with an EMAC, so the shared settings structures still compile on S2/S3/C3.
+> * SSDP moved from the removed `tcpip_adapter` API to `esp_netif`, and the task
+>   watchdog is reconfigured through the new config struct.
+> * **SmartRC-CC1101-Driver-Lib must be 3.0.2 or newer.** 2.5.7 calls `SPI.transfer()`
+>   without opening a transaction and wraps every register write in
+>   `SPI.begin()`/`SPI.end()`; on core 3.x the bus ends up in a state
+>   `spiTransferByte()` never returns from, and the watchdog reboots the device. It
+>   looks like the radio refusing to turn on: the log reaches `Radio Pins Configured!`
+>   and stops.
+>
+> Every source change is guarded on `ESP_ARDUINO_VERSION_MAJOR`, so the code still
+> compiles against core 2.x.
+>
+> **Build settings.** `PartitionScheme=default_8MB` with `FlashSize=16M` — the core 3.x
+> binary is ~1.35MB and no longer fits the 1.25MB app partition of the default 4MB
+> scheme. That puts the filesystem at `0x670000`, and its image has to be sized
+> **exactly** 1572864 bytes: littlefs records the block count in its superblock and
+> refuses to mount an image built for a differently sized partition.
+>
+> ```
+> arduino-cli compile --fqbn esp32:esp32:esp32s3:PSRAM=disabled,FlashMode=qio,FlashSize=16M,\
+> USBMode=hwcdc,CDCOnBoot=cdc,PartitionScheme=default_8MB,CPUFreq=240,DebugLevel=none .
+> ```
+>
+> **Only the ESP32-S3 is built here.** The ESP32, C3 and S2 targets are gone from the
+> workflows: on 4MB flash no layout holds a 1.35MB app, a 1.5MB web UI and an OTA slot
+> at the same time. Run those boards from upstream instead.
+>
+> **The updater points at this fork**, not at rstrouse/ESPSomfy-RTS — upstream releases
+> are core 2.0.17 builds with a differently sized filesystem image and would break a
+> device running this firmware.
+
 A controller for Somfy RTS blinds and shades that supports up to 32 individual shades and 16 groups over 433MHz RTx protocols.  If you have IO Home Control motors this project is not for you but you can use the IO Remote protocol to connect the ESPSomfy RTS device to a disected remote.  Look in the [Wiki](https://github.com/rstrouse/ESPSomfy-RTS/wiki/Controlling-Motors-with-GPIO) for options and verify whether the solution is workable for you.
 
 Most of the 433MHz protocols are supported to include RTS, RTW, RTV/L and 433.92MHz radio transceivers.  You can even mix and match these on the same device as long as the base frequency is tuned within the same range.  For instance, you cannot have 433.92MHz and 433.42MHz motors on the same device.
