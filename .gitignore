@@ -11,3 +11,6 @@ SomfyController.ino.esp32s2.bin
 
 # Arduino IDE compile output
 build/
+
+# PlatformIO
+.pio/

@@ -1,0 +1,20 @@
+# Rozlozenie flash pamate pre ESP32-S3 s 16MB, zhodne so schemou "default_8MB" v Arduino core.
+# Binarka z core 3.x ma ~1,35MB a do 1,25MB app particie 4MB schemy sa uz nezmesti.
+#
+# spiffs drzi web UI A ZAROVEN shades.cfg s konfiguraciou roliet, takze zapis obrazu
+# filesystemu vzdy zmaze aj rolety - zalohuj pred nim (viz devices/espsomfy-rts v
+# repozitari home-assistant-private).
+#
+# Velkost obrazu filesystemu musi presne sediet s velkostou particie: littlefs ma pocet
+# blokov ulozeny v superbloku a obraz pre inak velku particiu odmietne namountovat.
+#
+# Nazov suboru NIE JE partitions.csv zamerne - taky subor by Arduino IDE pouzilo namiesto
+# schemy zvolenej v menu a rozbilo by build pre ostatne dosky.
+#
+# Name,   Type, SubType, Offset,   Size,     Flags
+nvs,      data, nvs,     0x9000,   0x5000,
+otadata,  data, ota,     0xe000,   0x2000,
+app0,     app,  ota_0,   0x10000,  0x330000,
+app1,     app,  ota_1,   0x340000, 0x330000,
+spiffs,   data, spiffs,  0x670000, 0x180000,
+coredump, data, coredump,0x7F0000, 0x10000,

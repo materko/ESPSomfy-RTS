@@ -563,10 +563,12 @@ void SecuritySettings::print() {
   Serial.print(static_cast<uint8_t>(this->type));
   Serial.print(" Username:[");
   Serial.print(this->username);
+  // Only whether they are set, never the values. This line lands in every serial log
+  // and those end up pasted into issues and forum posts.
   Serial.print("] Password:[");
-  Serial.print(this->password);
+  Serial.print(strlen(this->password) > 0 ? "set" : "");
   Serial.print("] Pin:[");
-  Serial.print(this->pin);
+  Serial.print(strlen(this->pin) > 0 ? "set" : "");
   Serial.print("] Permissions:");
   Serial.println(this->permissions);
 }
@@ -639,9 +641,10 @@ void WifiSettings::print() {
   Serial.println("WIFI Settings");
   Serial.print(" SSID: [");
   Serial.print(this->ssid);
+  // Length only, never the passphrase itself -- see SecuritySettings::print().
   Serial.print("] PassPhrase: [");
-  Serial.print(this->passphrase);
-  Serial.println("]");  
+  Serial.print(strlen(this->passphrase));
+  Serial.println(" chars]");
 }
 void WifiSettings::printNetworks() {
   int n = WiFi.scanNetworks(false, false);

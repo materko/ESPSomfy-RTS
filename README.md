@@ -47,6 +47,37 @@
 > USBMode=hwcdc,CDCOnBoot=cdc,PartitionScheme=default_8MB,CPUFreq=240,DebugLevel=none .
 > ```
 >
+> **PlatformIO** builds the same thing from `platformio.ini`, which is where the settings
+> above — including the library versions this firmware depends on — are actually recorded:
+>
+> ```
+> pio run              # firmware
+> pio run -t buildfs   # filesystem image, web assets gzipped by tools/pio_gzip_data.py
+> pio run -t upload
+> ```
+>
+> Sources stay in the repository root (`src_dir = .`), so the sketch still opens in the
+> Arduino IDE and both toolchains work side by side.
+>
+> `board_build.arduino.memory_type = qio_qspi` is not optional. The
+> `esp32-s3-devkitc-1` board definition leaves it unset, PlatformIO then links a different
+> variant of the prebuilt SDK, and while everything still runs, files served off LittleFS
+> take roughly twenty times longer — 12s for a stylesheet. The binary is byte-identical in
+> size either way, so nothing about the build output gives it away. Arduino derives the
+> same value from two menu entries: `FlashMode: QIO` → `qio`, `PSRAM: Disabled` → `qspi`.
+>
+> **On Windows** the 260-character path limit breaks the install twice over: the Matter
+> headers inside `esp32-arduino-libs` overflow it in the default package directory, and the
+> CC1101 library's examples overflow it again under the project's `.pio/libdeps`. Both are
+> fixed by moving those directories somewhere short, and PlatformIO refuses to install
+> esptool from an MSys/MinGW shell, so run it from PowerShell:
+>
+> ```
+> $env:PLATFORMIO_CORE_DIR = "C:\pio"
+> $env:PLATFORMIO_LIBDEPS_DIR = "C:\pio\libdeps"
+> pio run
+> ```
+>
 > **Only the ESP32-S3 is built here.** The ESP32, C3 and S2 targets are gone from the
 > workflows: on 4MB flash no layout holds a 1.35MB app, a 1.5MB web UI and an OTA slot
 > at the same time. Run those boards from upstream instead.
