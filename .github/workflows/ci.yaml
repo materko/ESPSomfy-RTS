@@ -2,110 +2,41 @@ name: ESPSomfy-RTS
 
 on: [push, pull_request]
 
+# Build check for the one target this fork supports: ESP32-S3 with 16MB flash on
+# Arduino core 3.x. See release.yaml for why the other chips are not built here.
 env:
-  ARDUINO_BOARD_MANAGER_ADDITIONAL_URLS: "https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_dev_index.json"
-  ARDUINO_CLI_VERSION: "0.x"
-  ARDUINO_ESP32_VERSION: "2.0.10"
-  ARDUINO_JSON_VERSION: "6.21.3"
-  ESPTOOL_VERSION: "4.6"
-  LITTLEFS_VERSION: "v2.5.1"
-  MKLITTLEFS_VERSION: "3.1.0"
+  ARDUINO_BOARD_MANAGER_ADDITIONAL_URLS: "https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json"
+  ARDUINO_CLI_VERSION: "1.x"
+  ARDUINO_ESP32_VERSION: "3.3.11"
+  ARDUINO_JSON_VERSION: "6.21.5"
+  ESPTOOL_VERSION: "4.7"
   PUB_SUB_CLIENT_VERSION: "2.8.0"
   PYTHON_VERSION: "3.10"
-  SMARTRC_CC1101_VERSION: "2.5.7"
+  SMARTRC_CC1101_VERSION: "3.0.2"
   WEB_SOCKET_VERSION: "2.4.0"
+  FS_SIZE: "1572864"
+  FS_OFFSET: "0x670000"
+  FQBN: "esp32:esp32:esp32s3:JTAGAdapter=default,PSRAM=disabled,FlashMode=qio,FlashSize=16M,LoopCore=1,EventsCore=1,USBMode=hwcdc,CDCOnBoot=cdc,MSCOnBoot=default,DFUOnBoot=default,UploadMode=default,PartitionScheme=default_8MB,CPUFreq=240,UploadSpeed=921600,DebugLevel=none,EraseFlash=none"
 
 jobs:
-  littlefs:
-    name: LittleFS
+  build:
+    name: ESP32S3
     runs-on: ubuntu-latest
 
     steps:
       - name: Check out code
-        uses: actions/checkout@v3
-
-      - name: Checkout mklittlefs
-        uses: actions/checkout@v3
-        with:
-          repository: earlephilhower/mklittlefs
-          path: mklittlefs
-          ref: ${{ env.MKLITTLEFS_VERSION }}
-
-      - name: Checkout LittleFS
-        uses: actions/checkout@v3
-        with:
-          repository: littlefs-project/littlefs
-          path: mklittlefs/littlefs
-          ref: ${{ env.LITTLEFS_VERSION }}
-
-      - name: Build mklittlefs
-        run: |
-          make -C mklittlefs
-
-      - name: Create LittleFS
-        run: |
-          ./mklittlefs/mklittlefs --create data --size 1441792 SomfyController.littlefs.bin
-
-      - name: Upload binaries
-        uses: actions/upload-artifact@v3
-        with:
-          name: LittleFS
-          path: SomfyController.littlefs.bin
-          retention-days: 5
-
-  arduino:
-    name: ${{ matrix.name }}
-    needs: [littlefs]
-    runs-on: ubuntu-latest
-
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - board: esp32
-            addr_bootloader: 0x1000
-            chip: ESP32
-            fqbn: esp32:esp32:esp32
-            name: ESP32
-          - board: lolin_c3_mini
-            addr_bootloader: 0x0
-            chip: ESP32-C3
-            fqbn: esp32:esp32:lolin_c3_mini
-            name: LOLIN-C3-mini
-          - board: lolin_s2_mini
-            addr_bootloader: 0x1000
-            chip: ESP32-S2
-            fqbn: esp32:esp32:lolin_s2_mini
-            name: LOLIN-S2-mini
-          - board: lolin_s3_mini
-            addr_bootloader: 0x0
-            chip: ESP32-S3
-            fqbn: esp32:esp32:lolin_s3_mini
-            name: LOLIN-S3-mini
-
-    steps:
-      - name: Check out code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           path: SomfyController
 
-      - name: Get LittleFS
-        uses: actions/download-artifact@v3
-        with:
-          name: LittleFS
-
       - name: Install Python ${{ env.PYTHON_VERSION }}
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
-      - name: Upgrade pip
-        run: |
-          python -m pip install --upgrade pip
-          pip --version
-
       - name: Install ESPTool
         run: |
+          python -m pip install --upgrade pip
           pip install esptool==${{ env.ESPTOOL_VERSION }}
 
       - name: Install Arduino CLI
@@ -125,27 +56,35 @@ jobs:
           arduino-cli lib install SmartRC-CC1101-Driver-Lib@${{ env.SMARTRC_CC1101_VERSION }}
           arduino-cli lib install WebSockets@${{ env.WEB_SOCKET_VERSION }}
 
-      - name: Build ${{ matrix.name }}
+      - name: Create LittleFS
+        # The mklittlefs that ships with the core, so the image is written by the same
+        # littlefs version that mounts it.
+        run: |
+          MKLITTLEFS=$(find ~/.arduino15/packages/esp32/tools/mklittlefs -name mklittlefs -type f | head -1)
+          "$MKLITTLEFS" --create SomfyController/data --size ${{ env.FS_SIZE }} SomfyController.littlefs.bin
+
+      - name: Build
         run: |
           mkdir -p build
-          arduino-cli compile --clean --output-dir build --fqbn ${{ matrix.fqbn }} --warnings default ./SomfyController
+          arduino-cli compile --clean --output-dir build --fqbn "${{ env.FQBN }}" --warnings default ./SomfyController
 
-      - name: ${{ matrix.name }} Image
+      - name: Onboard Image
         run: |
-          python -m esptool --chip ${{ matrix.chip }} \
-            merge_bin -o build/SomfyController.onboard.bin \
-            ${{ matrix.addr_bootloader }} build/SomfyController.ino.bootloader.bin \
+          python -m esptool --chip ESP32-S3 \
+            merge_bin -o build/SomfyController.onboard.esp32s3.bin \
+            0x0 build/SomfyController.ino.bootloader.bin \
             0x8000 build/SomfyController.ino.partitions.bin \
             0x10000 build/SomfyController.ino.bin \
-            0x290000 SomfyController.littlefs.bin
+            ${{ env.FS_OFFSET }} SomfyController.littlefs.bin
 
-      - name: Upload ${{ matrix.name }}
-        uses: actions/upload-artifact@v3
+      - name: Upload binaries
+        uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.name }}
+          name: ESP32S3
           path: |
             build/SomfyController.ino.bin
             build/SomfyController.ino.bootloader.bin
             build/SomfyController.ino.partitions.bin
-            build/SomfyController.onboard.bin
+            build/SomfyController.onboard.esp32s3.bin
+            SomfyController.littlefs.bin
           retention-days: 5

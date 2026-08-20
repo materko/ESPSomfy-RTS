@@ -1,117 +1,44 @@
 name: ESPSomfy-RTS Release
 
-on: 
+on:
   release:
     types: [published]
 
+# This fork builds for the ESP32-S3 with 16MB flash only.
+#
+# It is pinned to Arduino core 3.x because core 2.0.17 reads flash incorrectly through
+# esp_flash_read on ESP32-S3-WROOM-1 N16R8 modules -- only the first 32 bytes of each
+# transaction reach the buffer -- which leaves LittleFS permanently unmountable. The
+# core 3.x binary is ~1.35MB and no longer fits the 1.25MB app partition of the default
+# 4MB scheme, hence default_8MB. That is also why the ESP32/C3/S2 targets upstream
+# builds are gone: on 4MB flash no layout holds a 1.35MB app, a 1.5MB web UI and an
+# OTA slot at the same time.
 env:
   ARDUINO_BOARD_MANAGER_ADDITIONAL_URLS: "https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json"
-  ARDUINO_CLI_VERSION: "0.x"
-  ARDUINO_ESP32_VERSION: "2.0.17"
+  ARDUINO_CLI_VERSION: "1.x"
+  ARDUINO_ESP32_VERSION: "3.3.11"
   ARDUINO_JSON_VERSION: "6.21.5"
   ESPTOOL_VERSION: "4.7"
-  LITTLEFS_VERSION: "v2.5.1"
-  MKLITTLEFS_VERSION: "3.1.0"
   PUB_SUB_CLIENT_VERSION: "2.8.0"
   PYTHON_VERSION: "3.10"
-  SMARTRC_CC1101_VERSION: "2.5.7"
+  # 2.5.7 calls SPI.transfer() without beginTransaction() and does SPI.begin()/end()
+  # around every register, which hangs in the core 3.x SPI driver until the watchdog
+  # reboots the device. 3.0.2 pairs the transactions and adds timeouts.
+  SMARTRC_CC1101_VERSION: "3.0.2"
   WEB_SOCKET_VERSION: "2.4.0"
+  # The spiffs partition of the default_8MB scheme. The image size has to match the
+  # partition exactly: littlefs records the block count in its superblock and refuses
+  # to mount when it disagrees with the partition it is handed.
+  FS_SIZE: "1572864"
+  FS_OFFSET: "0x670000"
+  FQBN: "esp32:esp32:esp32s3:JTAGAdapter=default,PSRAM=disabled,FlashMode=qio,FlashSize=16M,LoopCore=1,EventsCore=1,USBMode=hwcdc,CDCOnBoot=cdc,MSCOnBoot=default,DFUOnBoot=default,UploadMode=default,PartitionScheme=default_8MB,CPUFreq=240,UploadSpeed=921600,DebugLevel=none,EraseFlash=none"
 
 jobs:
-  littlefs:
-    name: LittleFS
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Get Release
-        id: get_release
-        uses: bruceadams/get-release@v1.3.2
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-
-      - name: Check out code
-        uses: actions/checkout@v4
-
-      - name: Checkout mklittlefs
-        uses: actions/checkout@v4
-        with:
-          repository: earlephilhower/mklittlefs
-          path: mklittlefs
-          ref: ${{ env.MKLITTLEFS_VERSION }}
-
-      - name: Checkout LittleFS
-        uses: actions/checkout@v4
-        with:
-          repository: littlefs-project/littlefs
-          path: mklittlefs/littlefs
-          ref: ${{ env.LITTLEFS_VERSION }}
-
-      - name: Build mklittlefs
-        run: |
-          make -C mklittlefs
-
-      - name: Create LittleFS
-        run: |
-          ./mklittlefs/mklittlefs --create data --size 1441792 SomfyController.littlefs.bin
-
-      - name: Upload binaries
-        uses: actions/upload-artifact@v4
-        with:
-          name: LittleFS
-          path: SomfyController.littlefs.bin
-          retention-days: 5
-
-      - name: Upload LittleFS
-        uses: shogo82148/actions-upload-release-asset@v1.7.5
-        with:
-          github_token: ${{ github.token }}
-          upload_url: ${{ steps.get_release.outputs.upload_url }}
-          asset_name: SomfyController.littlefs.bin
-          asset_path: SomfyController.littlefs.bin
-          overwrite: true
-
-  arduino:
+  build:
+    name: ESP32S3
     permissions: write-all
-    name: ${{ matrix.name }}
-    needs: [littlefs]
     runs-on: ubuntu-latest
 
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - board: esp32
-            addr_bootloader: 0x1000
-            chip: ESP32
-            fqbn: esp32:esp32:esp32wrover:PartitionScheme=default,FlashMode=qio,FlashFreq=80,UploadSpeed=921600,DebugLevel=none,EraseFlash=none
-            #     esp32:esp32:esp32wrover:PartitionScheme=default,FlashMode=qio,FlashFreq=80,UploadSpeed=921600,DebugLevel=none,EraseFlash=none
-            name: ESP32
-            obname: SomfyController.onboard.esp32.bin
-            fwname: SomfyController.ino.esp32.bin
-          - board: esp32c3
-            addr_bootloader: 0x0
-            chip: ESP32-C3
-            fqbn: esp32:esp32:esp32c3:JTAGAdapter=default,CDCOnBoot=cdc,PartitionScheme=default,CPUFreq=160,FlashMode=qio,FlashFreq=80,FlashSize=4M,UploadSpeed=921600,DebugLevel=none,EraseFlash=none
-            #     esp32:esp32:esp32c3:JTAGAdapter=default,CDCOnBoot=default,PartitionScheme=default,CPUFreq=160,FlashMode=qio,FlashFreq=80,FlashSize=4M,UploadSpeed=921600,DebugLevel=none,EraseFlash=none
-            name: ESP32C3
-            obname: SomfyController.onboard.esp32c3.bin
-            fwname: SomfyController.ino.esp32c3.bin
-          - board: esp32s2
-            addr_bootloader: 0x1000
-            chip: ESP32-S2
-            fqbn: esp32:esp32:esp32s2:JTAGAdapter=default,CDCOnBoot=cdc,MSCOnBoot=default,DFUOnBoot=default,UploadMode=default,PSRAM=disabled,PartitionScheme=default,CPUFreq=240,FlashMode=qio,FlashFreq=80,FlashSize=4M,UploadSpeed=921600,DebugLevel=none,EraseFlash=none
-            #     esp32:esp32:esp32s2:JTAGAdapter=default,CDCOnBoot=default,MSCOnBoot=default,DFUOnBoot=default,UploadMode=default,PSRAM=disabled,PartitionScheme=default,CPUFreq=240,FlashMode=qio,FlashFreq=80,FlashSize=4M,UploadSpeed=921600,DebugLevel=none,EraseFlash=none
-            name: ESP32S2
-            obname: SomfyController.onboard.esp32s2.bin
-            fwname: SomfyController.ino.esp32s2.bin
-          - board: esp32s3
-            addr_bootloader: 0x0
-            chip: ESP32-S3
-            fqbn: esp32:esp32:esp32s3:JTAGAdapter=default,PSRAM=disabled,FlashMode=qio,FlashSize=4M,LoopCore=1,EventsCore=1,USBMode=hwcdc,CDCOnBoot=cdc,MSCOnBoot=default,DFUOnBoot=default,UploadMode=default,PartitionScheme=default,CPUFreq=240,UploadSpeed=921600,DebugLevel=none,EraseFlash=none
-            #     esp32:esp32:esp32s3:JTAGAdapter=default,PSRAM=disabled,FlashMode=qio,FlashSize=4M,LoopCore=1,EventsCore=1,USBMode=hwcdc,CDCOnBoot=cdc,MSCOnBoot=default,DFUOnBoot=default,UploadMode=default,PartitionScheme=default,CPUFreq=240,UploadSpeed=921600,DebugLevel=none,EraseFlash=none
-            name: ESP32S3
-            fwname: SomfyController.ino.esp32s3.bin
-            obname: SomfyController.onboard.esp32s3.bin
     steps:
       - name: Get Release
         id: get_release
@@ -124,23 +51,14 @@ jobs:
         with:
           path: SomfyController
 
-      - name: Get LittleFS
-        uses: actions/download-artifact@v4
-        with:
-          name: LittleFS
-
       - name: Install Python ${{ env.PYTHON_VERSION }}
         uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
-      - name: Upgrade pip
-        run: |
-          python -m pip install --upgrade pip
-          pip --version
-
       - name: Install ESPTool
         run: |
+          python -m pip install --upgrade pip
           pip install esptool==${{ env.ESPTOOL_VERSION }}
 
       - name: Install Arduino CLI
@@ -160,41 +78,53 @@ jobs:
           arduino-cli lib install SmartRC-CC1101-Driver-Lib@${{ env.SMARTRC_CC1101_VERSION }}
           arduino-cli lib install WebSockets@${{ env.WEB_SOCKET_VERSION }}
 
-      - name: Build ${{ matrix.name }}
+      - name: Create LittleFS
+        # Use the mklittlefs that ships with the core rather than building one from
+        # source, so the image is written by the same littlefs version that mounts it.
         run: |
-          mkdir -p build${{ matrix.name }}
-          arduino-cli compile --clean --output-dir build${{ matrix.name }} --fqbn ${{ matrix.fqbn }} --warnings none ./SomfyController
+          MKLITTLEFS=$(find ~/.arduino15/packages/esp32/tools/mklittlefs -name mklittlefs -type f | head -1)
+          "$MKLITTLEFS" --create SomfyController/data --size ${{ env.FS_SIZE }} SomfyController.littlefs.bin
+          ls -l SomfyController.littlefs.bin
 
-      - name: ${{ matrix.name }} Image
+      - name: Build
         run: |
-          python -m esptool --chip ${{ matrix.chip }} \
-            merge_bin -o ${{ matrix.obname }} \
-            ${{ matrix.addr_bootloader }} build${{ matrix.name }}/SomfyController.ino.bootloader.bin \
-            0x8000 build${{ matrix.name }}/SomfyController.ino.partitions.bin \
-            0x10000 build${{ matrix.name }}/SomfyController.ino.bin \
-            0x290000 SomfyController.littlefs.bin
+          mkdir -p build
+          arduino-cli compile --clean --output-dir build --fqbn "${{ env.FQBN }}" --warnings none ./SomfyController
 
-      - name: Upload Firmware ${{ matrix.name }}
+      - name: Onboard Image
+        run: |
+          python -m esptool --chip ESP32-S3 \
+            merge_bin -o SomfyController.onboard.esp32s3.bin \
+            0x0 build/SomfyController.ino.bootloader.bin \
+            0x8000 build/SomfyController.ino.partitions.bin \
+            0x10000 build/SomfyController.ino.bin \
+            ${{ env.FS_OFFSET }} SomfyController.littlefs.bin
+          zip SomfyController.onboard.esp32s3.bin.zip ./SomfyController.onboard.esp32s3.bin
+
+      - name: Upload LittleFS
         uses: shogo82148/actions-upload-release-asset@v1.7.5
         with:
           github_token: ${{ github.token }}
           upload_url: ${{ steps.get_release.outputs.upload_url }}
-          asset_name: ${{ matrix.fwname }}
-          asset_path: build${{ matrix.name }}/SomfyController.ino.bin
+          asset_name: SomfyController.littlefs.bin
+          asset_path: SomfyController.littlefs.bin
+          overwrite: true
 
-      - name: ${{ matrix.name }} Compress Onboard Image
-        run: |
-          zip ${{ matrix.obname }}.zip ./${{ matrix.obname }}
-
-      - name: Upload Onboard ${{ matrix.name }}
+      - name: Upload Firmware
         uses: shogo82148/actions-upload-release-asset@v1.7.5
-        # env:
-        #  GITHUB_TOKEN: ${{ github.token }}
         with:
           github_token: ${{ github.token }}
           upload_url: ${{ steps.get_release.outputs.upload_url }}
-          asset_name: ${{ matrix.obname }}.zip
-          asset_path: ${{ matrix.obname }}.zip
+          asset_name: SomfyController.ino.esp32s3.bin
+          asset_path: build/SomfyController.ino.bin
+          overwrite: true
+
+      - name: Upload Onboard Image
+        uses: shogo82148/actions-upload-release-asset@v1.7.5
+        with:
+          github_token: ${{ github.token }}
+          upload_url: ${{ steps.get_release.outputs.upload_url }}
+          asset_name: SomfyController.onboard.esp32s3.bin.zip
+          asset_path: SomfyController.onboard.esp32s3.bin.zip
           overwrite: true
           asset_content_type: application/zip
-          
