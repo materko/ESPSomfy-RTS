@@ -219,11 +219,18 @@ void Web::handleStreamFile(WebServer &server, const char *filename, const char *
   // Load the index html page from the data directory.
   Serial.print("Loading file ");
   Serial.println(filename);
-  File file = LittleFS.open(filename, "r");
+  // Serve a gzipped copy when the filesystem carries one. Deciding this here rather
+  // than naming the .gz files in the route table means one firmware serves either a
+  // compressed or an uncompressed filesystem image, so an older image still works.
+  // streamFile() sets Content-Encoding itself once the file it is handed ends in .gz.
+  char gzipped[96];
+  snprintf(gzipped, sizeof(gzipped), "%s.gz", filename);
+  File file = LittleFS.open(LittleFS.exists(gzipped) ? gzipped : filename, "r");
   if (!file) {
     Serial.print("Error opening");
     Serial.println(filename);
     server.send(500, _encoding_text, "Error opening file");
+    return;
   }
   esp_task_wdt_delete(NULL);
   server.streamFile(file, encoding);

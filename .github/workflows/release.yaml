@@ -81,9 +81,16 @@ jobs:
       - name: Create LittleFS
         # Use the mklittlefs that ships with the core rather than building one from
         # source, so the image is written by the same littlefs version that mounts it.
+        # Text assets go in gzipped: handleStreamFile() picks up a <file>.gz when the
+        # image carries one and sets Content-Encoding. Images are already compressed
+        # and appversion is read by the firmware itself, so both stay as they are.
         run: |
+          cp -r SomfyController/data data-build
+          find data-build -type f \( -name "*.html" -o -name "*.css" -o -name "*.js" -o -name "*.svg" -o -name "*.json" \) \
+            -exec gzip -9 -f {} +
+          du -sk SomfyController/data data-build
           MKLITTLEFS=$(find ~/.arduino15/packages/esp32/tools/mklittlefs -name mklittlefs -type f | head -1)
-          "$MKLITTLEFS" --create SomfyController/data --size ${{ env.FS_SIZE }} SomfyController.littlefs.bin
+          "$MKLITTLEFS" --create data-build --size ${{ env.FS_SIZE }} SomfyController.littlefs.bin
           ls -l SomfyController.littlefs.bin
 
       - name: Build
