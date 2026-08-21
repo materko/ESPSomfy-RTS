@@ -4,34 +4,18 @@ on:
   release:
     types: [published]
 
-# This fork builds for the ESP32-S3 with 16MB flash only.
+# Builds through PlatformIO so that the versions and board settings come from
+# platformio.ini - the same file used to build on a workstation. Nothing about the
+# toolchain is pinned here any more; if it were, it could drift from what the hardware
+# actually runs.
 #
-# It is pinned to Arduino core 3.x because core 2.0.17 reads flash incorrectly through
-# esp_flash_read on ESP32-S3-WROOM-1 N16R8 modules -- only the first 32 bytes of each
-# transaction reach the buffer -- which leaves LittleFS permanently unmountable. The
-# core 3.x binary is ~1.35MB and no longer fits the 1.25MB app partition of the default
-# 4MB scheme, hence default_8MB. That is also why the ESP32/C3/S2 targets upstream
-# builds are gone: on 4MB flash no layout holds a 1.35MB app, a 1.5MB web UI and an
-# OTA slot at the same time.
+# This fork builds for the ESP32-S3 with 16MB flash only. See README.md for why it needs
+# Arduino core 3.x and why the ESP32/C3/S2 targets upstream builds are gone.
 env:
-  ARDUINO_BOARD_MANAGER_ADDITIONAL_URLS: "https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json"
-  ARDUINO_CLI_VERSION: "1.x"
-  ARDUINO_ESP32_VERSION: "3.3.11"
-  ARDUINO_JSON_VERSION: "6.21.5"
+  PYTHON_VERSION: "3.11"
   ESPTOOL_VERSION: "4.7"
-  PUB_SUB_CLIENT_VERSION: "2.8.0"
-  PYTHON_VERSION: "3.10"
-  # 2.5.7 calls SPI.transfer() without beginTransaction() and does SPI.begin()/end()
-  # around every register, which hangs in the core 3.x SPI driver until the watchdog
-  # reboots the device. 3.0.2 pairs the transactions and adds timeouts.
-  SMARTRC_CC1101_VERSION: "3.0.2"
-  WEB_SOCKET_VERSION: "2.4.0"
-  # The spiffs partition of the default_8MB scheme. The image size has to match the
-  # partition exactly: littlefs records the block count in its superblock and refuses
-  # to mount when it disagrees with the partition it is handed.
-  FS_SIZE: "1572864"
+  # spiffs partition of partitions_8mb.csv
   FS_OFFSET: "0x670000"
-  FQBN: "esp32:esp32:esp32s3:JTAGAdapter=default,PSRAM=disabled,FlashMode=qio,FlashSize=16M,LoopCore=1,EventsCore=1,USBMode=hwcdc,CDCOnBoot=cdc,MSCOnBoot=default,DFUOnBoot=default,UploadMode=default,PartitionScheme=default_8MB,CPUFreq=240,UploadSpeed=921600,DebugLevel=none,EraseFlash=none"
 
 jobs:
   build:
@@ -48,66 +32,47 @@ jobs:
 
       - name: Check out code
         uses: actions/checkout@v4
-        with:
-          path: SomfyController
 
       - name: Install Python ${{ env.PYTHON_VERSION }}
         uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
-      - name: Install ESPTool
+      - name: Cache PlatformIO
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.platformio
+            ~/.cache/pip
+          key: pio-${{ runner.os }}-${{ hashFiles('platformio.ini') }}
+          restore-keys: pio-${{ runner.os }}-
+
+      - name: Install PlatformIO and ESPTool
         run: |
           python -m pip install --upgrade pip
-          pip install esptool==${{ env.ESPTOOL_VERSION }}
+          pip install platformio esptool==${{ env.ESPTOOL_VERSION }}
 
-      - name: Install Arduino CLI
-        uses: arduino/setup-arduino-cli@v1
-        with:
-          version: ${{ env.ARDUINO_CLI_VERSION }}
+      - name: Build firmware
+        run: pio run
 
-      - name: Configure Arduino CLI
+      - name: Build filesystem
+        # tools/pio_gzip_data.py gzips the web assets on the way in
+        run: pio run -t buildfs
+
+      - name: Onboard image
+        # firmware.factory.bin already holds bootloader, partitions, boot_app0 and the
+        # application from 0x0; only the filesystem has to be added.
         run: |
-          arduino-cli core update-index
-          arduino-cli core install esp32:esp32@${{ env.ARDUINO_ESP32_VERSION }}
-
-      - name: Configure Arduino Libraries
-        run: |
-          arduino-cli lib install ArduinoJson@${{ env.ARDUINO_JSON_VERSION }}
-          arduino-cli lib install PubSubClient@${{ env.PUB_SUB_CLIENT_VERSION }}
-          arduino-cli lib install SmartRC-CC1101-Driver-Lib@${{ env.SMARTRC_CC1101_VERSION }}
-          arduino-cli lib install WebSockets@${{ env.WEB_SOCKET_VERSION }}
-
-      - name: Create LittleFS
-        # Use the mklittlefs that ships with the core rather than building one from
-        # source, so the image is written by the same littlefs version that mounts it.
-        # Text assets go in gzipped: handleStreamFile() picks up a <file>.gz when the
-        # image carries one and sets Content-Encoding. Images are already compressed
-        # and appversion is read by the firmware itself, so both stay as they are.
-        run: |
-          cp -r SomfyController/data data-build
-          find data-build -type f \( -name "*.html" -o -name "*.css" -o -name "*.js" -o -name "*.svg" -o -name "*.json" \) \
-            -exec gzip -9 -f {} +
-          du -sk SomfyController/data data-build
-          MKLITTLEFS=$(find ~/.arduino15/packages/esp32/tools/mklittlefs -name mklittlefs -type f | head -1)
-          "$MKLITTLEFS" --create data-build --size ${{ env.FS_SIZE }} SomfyController.littlefs.bin
-          ls -l SomfyController.littlefs.bin
-
-      - name: Build
-        run: |
-          mkdir -p build
-          arduino-cli compile --clean --output-dir build --fqbn "${{ env.FQBN }}" --warnings none ./SomfyController
-
-      - name: Onboard Image
-        run: |
-          python -m esptool --chip ESP32-S3 \
-            merge_bin -o SomfyController.onboard.esp32s3.bin \
-            0x0 build/SomfyController.ino.bootloader.bin \
-            0x8000 build/SomfyController.ino.partitions.bin \
-            0x10000 build/SomfyController.ino.bin \
+          cp .pio/build/esp32s3/firmware.bin SomfyController.ino.esp32s3.bin
+          cp .pio/build/esp32s3/littlefs.bin SomfyController.littlefs.bin
+          python -m esptool --chip ESP32-S3 merge_bin \
+            -o SomfyController.onboard.esp32s3.bin \
+            0x0 .pio/build/esp32s3/firmware.factory.bin \
             ${{ env.FS_OFFSET }} SomfyController.littlefs.bin
           zip SomfyController.onboard.esp32s3.bin.zip ./SomfyController.onboard.esp32s3.bin
+          ls -l SomfyController.*
 
+      # Asset names are what the updater in GitOTA.cpp downloads - do not rename them.
       - name: Upload LittleFS
         uses: shogo82148/actions-upload-release-asset@v1.7.5
         with:
@@ -123,7 +88,7 @@ jobs:
           github_token: ${{ github.token }}
           upload_url: ${{ steps.get_release.outputs.upload_url }}
           asset_name: SomfyController.ino.esp32s3.bin
-          asset_path: build/SomfyController.ino.bin
+          asset_path: SomfyController.ino.esp32s3.bin
           overwrite: true
 
       - name: Upload Onboard Image
