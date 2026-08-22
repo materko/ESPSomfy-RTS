@@ -318,10 +318,11 @@ class SomfyShade : public SomfyRemote {
     // advance during it, otherwise every move overshoots by that much.
     uint32_t upDelay = 0;
     uint32_t downDelay = 0;
-    // Time from the start of movement until the shade is halfway. A roller does not
-    // travel at a constant speed -- the fabric winds onto a drum whose diameter grows,
-    // so it covers more distance per second when it is wound up. Zero keeps the old
-    // linear behaviour; half of the travel time means the same thing.
+    // Time from the command until the shade is halfway -- measured the same way as the
+    // two above, because the command is the moment you can put a stopwatch on. A roller
+    // does not travel at a constant speed: the fabric winds onto a drum whose diameter
+    // grows, so it covers more distance per second when it is wound up. Zero keeps the
+    // old linear behaviour.
     uint32_t upMidTime = 0;
     uint32_t downMidTime = 0;
     float travelCurve(float elapsed, uint32_t travelTime, uint32_t midTime);

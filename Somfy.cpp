@@ -1137,7 +1137,11 @@ void SomfyShade::checkMovement() {
       // Travel time is what is left of downTime once the motor has stopped dawdling, and
       // the curve maps position to travel so the two conversions below stay inverses.
       uint32_t travel = downTime > this->downDelay ? downTime - this->downDelay : downTime;
-      int32_t msFrom0 = (int32_t)floor(this->travelTimeFor(this->startPos/100, travel, this->downMidTime));
+      // Every measured time is taken from the command, because that is the moment you can
+      // actually click a stopwatch on. The curve works in movement time, so the standstill
+      // comes off the halfway mark too.
+      uint32_t midTravel = this->downMidTime > this->downDelay ? this->downMidTime - this->downDelay : 0;
+      int32_t msFrom0 = (int32_t)floor(this->travelTimeFor(this->startPos/100, travel, midTravel));
 
       // So if the start position is .1 it is 10% closed so we have a 1000ms (1sec) of time to account for
       // before we add any more time. The shade does not budge for downDelay ms after the
@@ -1156,7 +1160,7 @@ void SomfyShade::checkMovement() {
         // a ratio of how much time has travelled over the total time to go 100%.
 
         // We should now have the number of ms it will take to reach the shade fully close.
-        this->p_currentPos(this->travelCurve((float)msFrom0, travel, this->downMidTime) * 100);
+        this->p_currentPos(this->travelCurve((float)msFrom0, travel, midTravel) * 100);
         // If the current position is >= 1 then we are at the bottom of the shade.
         if(this->currentPos >= 100) {
           this->p_currentPos(100.0);
@@ -1199,7 +1203,8 @@ void SomfyShade::checkMovement() {
       // Going up, the travelled fraction is how much of the shade is already open, so the
       // curve is fed (100 - position) and the result subtracted back off at the end.
       uint32_t travelUp = upTime > this->upDelay ? upTime - this->upDelay : upTime;
-      int32_t msFrom100 = (int32_t)floor(this->travelTimeFor((100.0f - this->startPos)/100, travelUp, this->upMidTime));
+      uint32_t midTravelUp = this->upMidTime > this->upDelay ? this->upMidTime - this->upDelay : 0;
+      int32_t msFrom100 = (int32_t)floor(this->travelTimeFor((100.0f - this->startPos)/100, travelUp, midTravelUp));
       int32_t elapsedUp = (int32_t)(curTime - this->moveStart) - (int32_t)this->upDelay;
       msFrom100 += max((int32_t)0, elapsedUp);
       msFrom100 = min((int32_t)travelUp, msFrom100);
@@ -1208,7 +1213,7 @@ void SomfyShade::checkMovement() {
         //this->p_direction(0);
       }
       else {
-        float fpos = ((float)1.0 - this->travelCurve((float)msFrom100, travelUp, this->upMidTime)) * 100;
+        float fpos = ((float)1.0 - this->travelCurve((float)msFrom100, travelUp, midTravelUp)) * 100;
         // We should now have the number of ms it will take to reach the shade fully open.
         // If we are at the top of the shade then set the movement to 0.
         if(fpos <= 0.0) {
