@@ -1134,24 +1134,29 @@ void SomfyShade::checkMovement() {
       // The starting posion is a float value from 0-1 that indicates how much the shade is open. So
       // if we take the starting position * the total down time then this will tell us how many ms it
       // has moved in the down position.
-      int32_t msFrom0 = (int32_t)floor((this->startPos/100) * downTime);
-      
+      // Travel time is what is left of downTime once the motor has stopped dawdling, and
+      // the curve maps position to travel so the two conversions below stay inverses.
+      uint32_t travel = downTime > this->downDelay ? downTime - this->downDelay : downTime;
+      int32_t msFrom0 = (int32_t)floor(this->travelTimeFor(this->startPos/100, travel, this->downMidTime));
+
       // So if the start position is .1 it is 10% closed so we have a 1000ms (1sec) of time to account for
-      // before we add any more time.
-      msFrom0 += (curTime - this->moveStart);
+      // before we add any more time. The shade does not budge for downDelay ms after the
+      // command, so that part of the elapsed time moves nothing.
+      int32_t elapsed = (int32_t)(curTime - this->moveStart) - (int32_t)this->downDelay;
+      msFrom0 += max((int32_t)0, elapsed);
       // Now we should have the total number of ms that the shade moved from the top.  But just so we
       // don't have any rounding errors make sure that it is not greater than the max down time.
-      msFrom0 = min(downTime, msFrom0);
-      if(msFrom0 >= downTime) {
+      msFrom0 = min((int32_t)travel, msFrom0);
+      if(msFrom0 >= (int32_t)travel) {
         this->p_currentPos(100.0f);
-        //this->p_direction(0);        
+        //this->p_direction(0);
       }
       else {
         // So now we know how much time has elapsed from the 0 position to down.  The current position should be
         // a ratio of how much time has travelled over the total time to go 100%.
-  
+
         // We should now have the number of ms it will take to reach the shade fully close.
-        this->p_currentPos((min(max((float)0.0, (float)msFrom0 / (float)downTime), (float)1.0)) * 100);
+        this->p_currentPos(this->travelCurve((float)msFrom0, travel, this->downMidTime) * 100);
         // If the current position is >= 1 then we are at the bottom of the shade.
         if(this->currentPos >= 100) {
           this->p_currentPos(100.0);
@@ -1191,15 +1196,19 @@ void SomfyShade::checkMovement() {
       // often move slower in the up position so since we are using a relative position the up time
       // can be calculated.
       // 10000ms from 100 to 0;
-      int32_t msFrom100 = upTime - (int32_t)floor((this->startPos/100) * upTime);
-      msFrom100 += (curTime - this->moveStart);
-      msFrom100 = min(upTime, msFrom100);
-      if(msFrom100 >= upTime) {
+      // Going up, the travelled fraction is how much of the shade is already open, so the
+      // curve is fed (100 - position) and the result subtracted back off at the end.
+      uint32_t travelUp = upTime > this->upDelay ? upTime - this->upDelay : upTime;
+      int32_t msFrom100 = (int32_t)floor(this->travelTimeFor((100.0f - this->startPos)/100, travelUp, this->upMidTime));
+      int32_t elapsedUp = (int32_t)(curTime - this->moveStart) - (int32_t)this->upDelay;
+      msFrom100 += max((int32_t)0, elapsedUp);
+      msFrom100 = min((int32_t)travelUp, msFrom100);
+      if(msFrom100 >= (int32_t)travelUp) {
         this->p_currentPos(0.0f);
         //this->p_direction(0);
       }
       else {
-        float fpos = ((float)1.0 - min(max((float)0.0, (float)msFrom100 / (float)upTime), (float)1.0)) * 100;
+        float fpos = ((float)1.0 - this->travelCurve((float)msFrom100, travelUp, this->upMidTime)) * 100;
         // We should now have the number of ms it will take to reach the shade fully open.
         // If we are at the top of the shade then set the movement to 0.
         if(fpos <= 0.0) {
@@ -3219,6 +3228,10 @@ int8_t SomfyShade::fromJSON(JsonObject &obj) {
     if(obj.containsKey("roomId")) this->roomId = obj["roomId"];
     if(obj.containsKey("upTime")) this->upTime = obj["upTime"];
     if(obj.containsKey("downTime")) this->downTime = obj["downTime"];
+    if(obj.containsKey("upDelay")) this->upDelay = obj["upDelay"];
+    if(obj.containsKey("downDelay")) this->downDelay = obj["downDelay"];
+    if(obj.containsKey("upMidTime")) this->upMidTime = obj["upMidTime"];
+    if(obj.containsKey("downMidTime")) this->downMidTime = obj["downMidTime"];
     if(obj.containsKey("remoteAddress")) this->setRemoteAddress(obj["remoteAddress"]);
     if(obj.containsKey("tiltTime")) this->tiltTime = obj["tiltTime"];
     if(obj.containsKey("stepSize")) this->stepSize = obj["stepSize"];
@@ -3334,6 +3347,10 @@ void SomfyShade::toJSON(JsonResponse &json) {
   json.addElem("remoteAddress", (uint32_t)this->m_remoteAddress);
   json.addElem("upTime", (uint32_t)this->upTime);
   json.addElem("downTime", (uint32_t)this->downTime);
+  json.addElem("upDelay", (uint32_t)this->upDelay);
+  json.addElem("downDelay", (uint32_t)this->downDelay);
+  json.addElem("upMidTime", (uint32_t)this->upMidTime);
+  json.addElem("downMidTime", (uint32_t)this->downMidTime);
   json.addElem("paired", this->paired);
   json.addElem("lastRollingCode", (uint32_t)this->lastRollingCode);
   json.addElem("position", this->transformPosition(this->currentPos));
@@ -3387,6 +3404,10 @@ bool SomfyShade::toJSON(JsonObject &obj) {
   obj["remoteAddress"] = this->m_remoteAddress;
   obj["upTime"] = this->upTime;
   obj["downTime"] = this->downTime;
+  obj["upDelay"] = this->upDelay;
+  obj["downDelay"] = this->downDelay;
+  obj["upMidTime"] = this->upMidTime;
+  obj["downMidTime"] = this->downMidTime;
   obj["paired"] = this->paired;
   //obj["remotePrefId"] = this->getRemotePrefId();
   obj["lastRollingCode"] = this->lastRollingCode;
@@ -4086,6 +4107,35 @@ bool SomfyShadeController::deleteGroup(uint8_t groupId) {
 }
 
 bool SomfyShadeController::loadShadesFile(const char *filename) { return ShadeConfigFile::load(this, filename); }
+/* Position along the travel as a fraction 0-1 after `elapsed` ms of movement.
+ *
+ * With midTime set, the shade is known to be halfway after that many ms, which for a
+ * roller is sooner than half the travel time: the drum is at its widest when the fabric
+ * is wound up, so the first half goes faster. Fitting p = t^k through that one measured
+ * point (t and p both normalised, k = ln(0.5)/ln(midTime/travelTime)) gives a curve that
+ * is exact at 0%, 50% and 100% and monotonic for any midTime, and -- unlike the
+ * quadratic the winding geometry actually implies -- it cannot fold back on itself when
+ * midTime is extreme. Inverting it is a second power, no solver needed.
+ *
+ * midTime of 0, or exactly half the travel time, yields k = 1: plain linear, which is
+ * what every shade that has not been measured keeps doing.
+ */
+float SomfyShade::travelCurve(float elapsed, uint32_t travelTime, uint32_t midTime) {
+  if(travelTime == 0) return 1.0f;
+  float t = min(max(elapsed / (float)travelTime, 0.0f), 1.0f);
+  if(midTime == 0 || midTime >= travelTime) return t;
+  float m = (float)midTime / (float)travelTime;
+  if(m <= 0.0f || m >= 1.0f || fabs(m - 0.5f) < 0.001f) return t;
+  return powf(t, logf(0.5f) / logf(m));
+}
+/* Inverse of travelCurve(): ms of movement needed to reach `pos` (0-1). */
+float SomfyShade::travelTimeFor(float pos, uint32_t travelTime, uint32_t midTime) {
+  float p = min(max(pos, 0.0f), 1.0f);
+  if(midTime == 0 || midTime >= travelTime) return p * travelTime;
+  float m = (float)midTime / (float)travelTime;
+  if(m <= 0.0f || m >= 1.0f || fabs(m - 0.5f) < 0.001f) return p * travelTime;
+  return powf(p, logf(m) / logf(0.5f)) * travelTime;
+}
 uint16_t SomfyRemote::getNextRollingCode() {
   pref.begin("ShadeCodes");
   uint16_t code = pref.getUShort(this->m_remotePrefId, 0);

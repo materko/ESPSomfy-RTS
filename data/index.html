@@ -562,6 +562,28 @@
                                     <input id="fldShadeDownTime" name="shadeDownTime" type="number" data-bind="downTime" data-datatype="int" length=5 placeholder="milliseconds" style="width:100%;text-align:right;" />
                                     <label for="fldShadeDownTime">Down Time (ms)</label>
                                 </div>
+                                <div class="field-group" style="display:inline-block;max-width:127px;margin-right:17px;">
+                                    <input id="fldShadeUpDelay" name="shadeUpDelay" data-bind="upDelay" data-datatype="int" type="number" length=5 placeholder="milliseconds" style="width:100%;text-align:right;" />
+                                    <label for="fldShadeUpDelay">Up Start Delay (ms)</label>
+                                </div>
+                                <div class="field-group" style="display:inline-block;max-width:127px;">
+                                    <input id="fldShadeDownDelay" name="shadeDownDelay" data-bind="downDelay" data-datatype="int" type="number" length=5 placeholder="milliseconds" style="width:100%;text-align:right;" />
+                                    <label for="fldShadeDownDelay">Down Start Delay (ms)</label>
+                                </div>
+                                <div class="field-group" style="display:inline-block;max-width:127px;margin-right:17px;">
+                                    <input id="fldShadeUpMidTime" name="shadeUpMidTime" data-bind="upMidTime" data-datatype="int" type="number" length=5 placeholder="milliseconds" style="width:100%;text-align:right;" />
+                                    <label for="fldShadeUpMidTime">Up Time to 50% (ms)</label>
+                                </div>
+                                <div class="field-group" style="display:inline-block;max-width:127px;">
+                                    <input id="fldShadeDownMidTime" name="shadeDownMidTime" data-bind="downMidTime" data-datatype="int" type="number" length=5 placeholder="milliseconds" style="width:100%;text-align:right;" />
+                                    <label for="fldShadeDownMidTime">Down Time to 50% (ms)</label>
+                                </div>
+                                <div style="font-size:.8em;opacity:.75;margin:2px 0 6px 2px;">
+                                    Start delay is how long the motor takes to react to the command. Time to 50% is
+                                    measured from the moment it starts moving until the shade is halfway &mdash; a
+                                    roller gets there sooner than half the travel time. Leave either at 0 for the
+                                    plain linear estimate.
+                                </div>
                             </div>
                             <div id="divTiltSettings" style="display:none;margin-top:-10px;">
                                 <div class="field-group" style="display:inline-block; margin-right:17px;width:127px;vertical-align:middle;">

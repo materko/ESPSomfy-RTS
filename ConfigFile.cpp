@@ -7,9 +7,9 @@
 
 extern Preferences pref;
 
-#define SHADE_HDR_VER 24
+#define SHADE_HDR_VER 25
 #define SHADE_HDR_SIZE 76
-#define SHADE_REC_SIZE 276
+#define SHADE_REC_SIZE 320
 #define GROUP_REC_SIZE 200
 #define TRANS_REC_SIZE 74
 #define ROOM_REC_SIZE 29
@@ -799,6 +799,15 @@ bool ShadeConfigFile::readShadeRecord(SomfyShade *shade) {
   shade->upTime = this->readUInt32(shade->upTime);
   shade->downTime = this->readUInt32(shade->downTime);
   shade->tiltTime = this->readUInt32(shade->tiltTime);
+  // Version 25 added the start delay and the halfway time, per direction. Files written
+  // before it do not carry them, and zero means the position keeps being worked out the
+  // way it always was: linear, counted from the moment the command went out.
+  if(this->header.version >= 25) {
+    shade->upDelay = this->readUInt32(0);
+    shade->downDelay = this->readUInt32(0);
+    shade->upMidTime = this->readUInt32(0);
+    shade->downMidTime = this->readUInt32(0);
+  }
   if(this->header.version > 5) shade->stepSize = this->readUInt16(100);
   for(uint8_t j = 0; j < SOMFY_MAX_LINKED_REMOTES; j++) {
     SomfyLinkedRemote *rem = &shade->linkedRemotes[j];
@@ -968,6 +977,10 @@ bool ShadeConfigFile::writeShadeRecord(SomfyShade *shade) {
   this->writeUInt32(shade->upTime);
   this->writeUInt32(shade->downTime);
   this->writeUInt32(shade->tiltTime);
+  this->writeUInt32(shade->upDelay);
+  this->writeUInt32(shade->downDelay);
+  this->writeUInt32(shade->upMidTime);
+  this->writeUInt32(shade->downMidTime);
   this->writeUInt16(shade->stepSize);
   for(uint8_t j = 0; j < SOMFY_MAX_LINKED_REMOTES; j++) {
     SomfyLinkedRemote *rem = &shade->linkedRemotes[j];
